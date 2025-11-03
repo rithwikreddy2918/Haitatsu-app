@@ -1,4 +1,5 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './PlaceOrder.css';
 import { StoreContext } from '../../Context/StoreContext';
 import axios from 'axios';
@@ -7,7 +8,7 @@ const PlaceOrder = () => {
   const { getTotalCartAmount, token, food_list, cartItems, url, userId } = useContext(StoreContext);
   const [data, setData] = useState({
     firstName: '',
-    lastName: '',
+    lastName: '', 
     email: '',
     street: '',
     city: '',
@@ -63,29 +64,47 @@ const PlaceOrder = () => {
         headers: { token }
       });
 
-      if (!response.data.success) {
-        alert("Error creating order. Try again.");
-        return;
-      }
-
+      
       const loaded = await loadRazorpayScript();
       if (!loaded) {
         alert("Failed to load Razorpay SDK. Check your connection.");
         return;
       }
 
-      const { orderId, amount, currency, key } = response.data;
+      const { orderId, amount, currency, key,dbOrderId } = response.data;
 
       const options = {
-        key: key, // Razorpay key
+        key: key,
         amount: amount,
         currency: currency,
         name: "Haitatsu Food",
         description: "Order Payment",
         order_id: orderId,
-        handler: function (paymentResult) {
-          alert("Payment Successful! Payment ID: " + paymentResult.razorpay_payment_id);
-          // Optionally redirect to success page
+        handler: async function (paymentResult) {
+          try {
+            // verify payment on backend (updates DB)
+            const verifyRes = await axios.post(`${url}/api/order/verify`, {
+              razorpay_order_id: paymentResult.razorpay_order_id,
+              razorpay_payment_id: paymentResult.razorpay_payment_id,
+              razorpay_signature: paymentResult.razorpay_signature,
+              orderId: orderId,
+              dbOrderId: dbOrderId
+            }, {
+              headers: { token }
+            });
+
+            if (verifyRes.data?.success) {
+              alert("Payment successful and verified");
+              navigate('/myorders');
+            } else {
+              alert("Payment succeeded but verification failed");
+              navigate('/');
+            }
+          } catch (err) {
+            console.error('verify error', err);
+            alert('Error verifying payment');
+            navigate('/');
+          }
         },
         prefill: {
           name: `${data.firstName} ${data.lastName}`,
@@ -94,7 +113,6 @@ const PlaceOrder = () => {
         },
         theme: { color: "#3399cc" }
       };
-
       const rzp = new window.Razorpay(options);
       rzp.open();
 
@@ -103,6 +121,14 @@ const PlaceOrder = () => {
       alert("Error in placing order");
     }
   };
+  const navigate =useNavigate();
+  useEffect(() => {
+    if(!token){
+      navigate('/cart')
+    }else if(getTotalCartAmount()===0){
+      navigate('/cart')
+    }
+  },[token])
 
   return (
     <form onSubmit={placeOrder} className="place-order">

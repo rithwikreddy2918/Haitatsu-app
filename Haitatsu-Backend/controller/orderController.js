@@ -9,7 +9,7 @@ const razorpayInstance=new Razorpay({
 });
 
 const placeOrder=async(req,res)=>{
-    const frontendUrl="http://localhost:5173"
+    const frontendUrl="http://localhost:5174"
 try{
      console.log("Frontend sent amount (USD):", req.body.amount);
  const newOrder=new orderModel({
@@ -33,10 +33,13 @@ const options = {
 };
 
 const order = await razorpayInstance.orders.create(options);
-
+  await orderModel.findByIdAndUpdate(newOrder._id, {
+    $set: { "payment.razorpay_order_id": order.id }
+  });
 res.json({
   success: true,
   orderId: order.id,
+  dbOrderId: newOrder._id,
   amount: order.amount,
   currency: order.currency,
   key: process.env.RAZORPAY_KEY_ID,
@@ -50,8 +53,12 @@ res.json({
 
 const verifyOrder = async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature,orderId,dbOrderId } = req.body;
 
+    
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, message: "Missing payment params" });
+    }
     const body = razorpay_order_id + "|" + razorpay_payment_id;
 
     const expectedSignature = crypto
@@ -60,15 +67,15 @@ const verifyOrder = async (req, res) => {
       .digest("hex");
 
     const isAuthentic = expectedSignature === razorpay_signature;
-
+     const query = dbOrderId ? { _id: dbOrderId } : { "payment.razorpay_order_id": razorpay_order_id };
     if (isAuthentic) {
-      await orderModel.findOneAndUpdate(
-        { "payment.razorpay_order_id": razorpay_order_id },
-        {
+      await orderModel.findOneAndUpdate(query,{
           $set: {
+            "payment.razorpay_order_id": razorpay_order_id ,
             "payment.razorpay_payment_id": razorpay_payment_id,
             "payment.razorpay_signature": razorpay_signature,
-            status: "Paid"
+            paymentStatus: "Paid",       
+            status: "Processing",  
           }
         }
       );
@@ -95,6 +102,24 @@ try{
 }
 }
 
+const listOrders=async(req,res)=>{
+  try{
+      const orders=await orderModel.find({});
+      res.json({success:true,data:orders});
+  }catch(error){
+    console.log(error);
+   res.json({success:false,message:"Error in fetching orders"});
+  }
+}
 
+const updateStatus=async(req,res)=>{
+ try{
+    await orderModel.findByIdAndUpdate(req.body.orderId,{status:req.body.status});
+    res.json({success:true,message:"Status updated"});
+ }catch(error){
+  console.log(error);
+  res.json({success:false,message:"Error in updating status"});
+ }
+}
 
-export {placeOrder,verifyOrder,userOrders}
+export {placeOrder,verifyOrder,userOrders,listOrders,updateStatus};
